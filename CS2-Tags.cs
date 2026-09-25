@@ -26,7 +26,8 @@ public class CS2_Tags : BasePlugin
 	public override string ModuleName => "CS2-Tags";
 	public override string ModuleDescription => "Add player tags easily in cs2 game";
 	public override string ModuleAuthor => "daffyy";
-	public override string ModuleVersion => "1.0.4c-nom5";
+	// Version définie dans CS2-Tags.csproj (VersionBase + numéro de compilation)
+	public override string ModuleVersion => typeof(CS2_Tags).Assembly.GetName().Version!.ToString(3);
 
 	public override void Load(bool hotReload)
 	{

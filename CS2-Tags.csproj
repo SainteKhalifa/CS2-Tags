@@ -6,6 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- Version = VersionBase.BuildNumber ; BuildNumber = numéro de compilation GitHub (0 en local) -->
+    <VersionBase>2.0</VersionBase>
+    <BuildNumber Condition="'$(BuildNumber)' == ''">0</BuildNumber>
+    <Version>$(VersionBase).$(BuildNumber)</Version>
   </PropertyGroup>
 
   <ItemGroup>

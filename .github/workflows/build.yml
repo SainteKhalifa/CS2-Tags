@@ -27,7 +27,7 @@ jobs:
         dotnet-version: 10.0.x
 
     - name: Build
-      run: dotnet build ${{ env.PROJECT_PATH }} -c Release -o ${{ env.OUTPUT_PATH }}
+      run: dotnet build ${{ env.PROJECT_PATH }} -c Release -o ${{ env.OUTPUT_PATH }} -p:BuildNumber=${{ github.run_number }}
 
     # L'API CounterStrikeSharp est déjà fournie par le serveur
     - name: Clean files
@@ -45,10 +45,10 @@ jobs:
         COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         RUN_NUMBER: ${{ github.run_number }}
       run: |
-        VERSION=$(grep -oP 'ModuleVersion => "\K[^"]+' CS2-Tags.cs)
-        TAG="v${VERSION}-build.${RUN_NUMBER}"
+        VERSION="$(grep -oP '<VersionBase>\K[^<]+' CS2-Tags.csproj).${RUN_NUMBER}"
+        TAG="v${VERSION}"
         {
-          echo "CS2-Tags ${VERSION}, compilé pour CounterStrikeSharp 1.0.375 (.NET 10)."
+          echo "CS2-Tags v${VERSION}, compilé pour CounterStrikeSharp 1.0.375 (.NET 10)."
           echo
           echo "Installation : extraire le dossier CS2-Tags du zip dans game/csgo/addons/counterstrikesharp/plugins/"
           echo "Le fichier tags.json n'est pas inclus : il est créé au premier démarrage s'il n'existe pas, et votre configuration est conservée lors d'une mise à jour."
@@ -58,4 +58,4 @@ jobs:
             echo "$COMMIT_MESSAGE"
           fi
         } > release-notes.md
-        gh release create "$TAG" "${PROJECT_NAME}.zip" --target "$GITHUB_SHA" --title "CS2-Tags ${VERSION} (build ${RUN_NUMBER})" --notes-file release-notes.md
+        gh release create "$TAG" "${PROJECT_NAME}.zip" --target "$GITHUB_SHA" --title "CS2-Tags v${VERSION}" --notes-file release-notes.md

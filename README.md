@@ -110,8 +110,14 @@ docker run --rm -v "$PWD":/src -w /src mcr.microsoft.com/dotnet/sdk:10.0 dotnet 
 ```
 Copier ensuite le contenu de `build/`, sauf `CounterStrikeSharp.API.*`, dans `addons/counterstrikesharp/plugins/CS2-Tags/`.
 
-## Releases automatiques
-À chaque push sur `main` (ou via le bouton « Run workflow » de l'onglet Actions), GitHub Actions compile le plugin et publie une release avec `CS2-Tags.zip`, par exemple « CS2-Tags 1.0.4c-nom5 (build 1) ». La version vient de `ModuleVersion` dans `CS2-Tags.cs` : la changer à chaque nouvelle version. Sur un fork, les Actions doivent d'abord être activées dans l'onglet Actions.
+## Versions et releases automatiques
+Les versions suivent le format **v2.0.N**, où N est le numéro de compilation GitHub : il augmente tout seul à chaque compilation.
+
+À chaque push sur `main` (ou via le bouton « Run workflow » de l'onglet Actions), GitHub Actions compile le plugin et publie une release « CS2-Tags v2.0.N » (tag `v2.0.N`) avec `CS2-Tags.zip`. Le même numéro s'affiche en jeu avec `css_plugins list`.
+
+Pour une grosse mise à jour, changer `VersionBase` dans `CS2-Tags.csproj` (ex. `2.0` → `2.1`). Une compilation locale affiche `2.0.0`.
+
+Sur un fork, les Actions doivent d'abord être activées dans l'onglet Actions.
 
 ## Crédits
 Plugin original par [daffyy](https://github.com/daffyyyy) : [daffyyyy/CS2-Tags](https://github.com/daffyyyy/CS2-Tags). Pour soutenir l'auteur original :
