@@ -475,7 +475,8 @@ public class CS2_Tags : BasePlugin
 			.ToList();
 	}
 
-	// Masque le tag de clan de tous les joueurs et des bots (tag Steam, "BOT" du jeu, ancien tag du plugin) : texte et groupe
+	// Masque le tag de clan (texte et groupe) des joueurs et des bots : tag Steam, ancien tag du plugin.
+	// L'étiquette « BOT » des bots est affichée par le jeu lui-même, elle ne vient pas du tag de clan.
 	private void HideClanTag(CCSPlayerController player)
 	{
 		if (!player.IsValid || player.IsHLTV) return;

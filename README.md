@@ -6,8 +6,8 @@ Fork de [daffyyyy/CS2-Tags](https://github.com/daffyyyy/CS2-Tags), adapté à la
 
 ## Différences avec le plugin original
 - Le tag `scoreboard` est placé **devant le pseudo** (ex. `✦ADMIN✦ Pseudo`) au lieu du tag de clan : il s'affiche dans la police normale, au scoreboard comme dans le killfeed.
-- Les **tags de clan de tous les joueurs sont masqués**, bots compris, y compris les tags de groupe Steam. Le plugin les vérifie toutes les 2 secondes, car le jeu peut les remettre quand les données Steam d'un joueur arrivent.
-- Les **bots** ont leur propre entrée `bot`, facultative. Sans elle, ils n'ont pas de tag : ils ne prennent jamais le tag `everyone`. Le bot CSTV n'est jamais touché.
+- Les **tags de clan des joueurs sont masqués**, y compris les tags de groupe Steam. Le plugin les vérifie toutes les 2 secondes, car le jeu peut les remettre quand les données Steam d'un joueur arrivent.
+- Les **bots sont laissés par défaut** : ils gardent leur nom et ne prennent jamais le tag `everyone`. L'étiquette « BOT » que le jeu affiche sur eux n'est pas un tag de clan : elle est ajoutée par le jeu lui-même et ne peut pas être retirée depuis le serveur. Le bot CSTV n'est jamais touché.
 - Dans le chat, le plugin affiche le vrai pseudo, pour ne pas écrire le tag deux fois.
 - `css_tags_reload` réapplique les tags immédiatement.
 - Si le plugin est déchargé (`css_plugins unload`), les joueurs retrouvent leur vrai pseudo.
@@ -50,9 +50,6 @@ Fichier `addons/counterstrikesharp/plugins/CS2-Tags/tags.json`. Les commentaires
       "nick_color": "",
       "message_color": "",
       "scoreboard": ""               // Vide : pas de tag
-    },
-    "bot": {                         // Bots (facultatif)
-      "scoreboard": "BOT"
     }
   }
 }
@@ -61,6 +58,7 @@ Fichier `addons/counterstrikesharp/plugins/CS2-Tags/tags.json`. Les commentaires
 - **Priorité** : l'entrée SteamID64 d'abord, puis les groupes (`#`) et permissions (`@`) dans l'ordre du fichier, puis `everyone`. Pour le tag du pseudo, une entrée dont `scoreboard` est vide est ignorée au profit de la suivante qui correspond.
 - **Après une modification**, lancer `css_tags_reload` : c'est pris en compte tout de suite, sans redémarrer.
 - **Longueur** : le pseudo complet (tag + pseudo) est limité à 127 octets ; au-delà, il est tronqué.
+- **Bots** : une entrée facultative `"bot": { "scoreboard": "..." }` ajoute un tag devant le nom des bots. Par défaut il n'y en a pas, et c'est préférable : le jeu affiche déjà sa propre étiquette « BOT ».
 
 ### Choisir ses symboles
 Ces symboles existent dans les polices fournies avec CS2, ils s'affichent donc chez tous les joueurs (Windows, Linux, Steam Deck) :
@@ -75,7 +73,7 @@ Ces symboles existent dans les polices fournies avec CS2, ils s'affichent donc c
 
 ## Chat
 - Les messages des joueurs tagués sont réécrits avec le préfixe et les couleurs de leur entrée ; `☠` est ajouté devant les messages des joueurs morts.
-- Chat d'équipe : les messages sont précédés de `(T)` ou `(CT)`.
+- Chat d'équipe : les messages sont précédés de `(T)`, `(CT)` ou `(SPEC)`.
 - Les messages qui commencent par `!`, `@`, `/` ou `.` (commandes), ainsi que le message `rtv`, ne sont pas réécrits.
 - **Chat admin** : un message d'équipe qui commence par `@`, envoyé par un joueur ayant la permission `@css/chat`, est transmis à tous les joueurs ayant cette permission, sous la forme `(ADMIN) Pseudo: message`.
 
@@ -96,6 +94,8 @@ Les couleurs ne s'appliquent qu'au chat : au scoreboard et dans le killfeed, le 
 ## À savoir
 - Le tag fait partie du pseudo : les autres plugins (classements, logs, notifications Discord…) voient aussi le pseudo avec le tag.
 - La commande `status` du serveur affiche toujours le nom d'origine ; utiliser `css_tags_debug` pour voir le pseudo appliqué.
+- Les bots gardent l'étiquette « BOT » et l'icône de robot (colonne ping) affichées par le jeu : ce n'est pas un tag de clan, le serveur ne peut pas les retirer.
+- La saisie du chat de CS2 est limitée à 127 caractères, et le jeu retire les guillemets doubles avant l'envoi : ce sont des limites du jeu, pas du plugin.
 
 ## Prérequis
 [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp/) **1.0.375** ou plus récent (.NET 10).
