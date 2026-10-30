@@ -4,8 +4,10 @@ using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Entities;
 using CounterStrikeSharp.API.Modules.Timers;
+using CounterStrikeSharp.API.Modules.UserMessages;
 using CounterStrikeSharp.API.Modules.Utils;
 using Newtonsoft.Json.Linq;
 using System.Reflection;
@@ -17,11 +19,9 @@ namespace CS2_Tags;
 public class CS2_Tags : BasePlugin
 {
 	private HashSet<string> GaggedIds = new HashSet<string>();
-	// Par slot : le vrai pseudo du joueur, et le pseudo (tag compris) que le plugin lui a donné
-	private readonly Dictionary<int, string> RealNames = new();
-	private readonly Dictionary<int, string> AppliedNames = new();
-	// Par slot : dernier tag de clan effacé et nombre d'effacements (affichés par css_tags_debug)
-	private readonly Dictionary<int, (string Clan, int Count)> ClearedClans = new();
+	// Par slot : le tag de clan d'origine du joueur (groupe Steam), et le tag de clan que le plugin lui a donné
+	private readonly Dictionary<int, (string Clan, uint ClanId)> OriginalClans = new();
+	private readonly Dictionary<int, string> AppliedClans = new();
 	public static JObject? JsonTags { get; private set; }
 	public override string ModuleName => "CS2-Tags";
 	public override string ModuleDescription => "Add player tags easily in cs2 game";
@@ -39,27 +39,22 @@ public class CS2_Tags : BasePlugin
 		RegisterEventHandler<EventPlayerConnectFull>(OnPlayerConnectFull);
 		RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
 		RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);
-		RegisterEventHandler<EventPlayerChangename>(OnPlayerChangeName);
 		AddCommandListener("say", OnPlayerChat);
 		AddCommandListener("say_team", OnPlayerChatTeam);
 
 		// Joueurs déjà connectés (rechargement du plugin en cours de partie)
-		AddTimer(1.0f, () => Utilities.GetPlayers().ForEach(ApplyScoreboardTag));
+		AddTimer(1.0f, () => Utilities.GetPlayers().ForEach(ApplyClanTag));
 
 		// Le jeu peut remettre le tag de clan Steam à tout moment (données Steam du joueur reçues en différé)
-		AddTimer(2.0f, () => Utilities.GetPlayers().ForEach(HideClanTag), TimerFlags.REPEAT);
+		AddTimer(2.0f, () => Utilities.GetPlayers().ForEach(EnforceClanTag), TimerFlags.REPEAT);
 	}
 
 	public override void Unload(bool hotReload)
 	{
 		if (hotReload) return;
 
-		// Plugin retiré : rendre leur vrai pseudo aux joueurs
-		foreach (var player in Utilities.GetPlayers())
-		{
-			if (AppliedNames.TryGetValue(player.Slot, out var appliedName) && appliedName == player.PlayerName && RealNames.TryGetValue(player.Slot, out var realName))
-				SetName(player, realName);
-		}
+		// Plugin retiré : rendre leur tag de clan d'origine aux joueurs
+		Utilities.GetPlayers().ForEach(RestoreOriginalClan);
 	}
 
 	private void OnMapStart(string mapName)
@@ -123,7 +118,7 @@ public class CS2_Tags : BasePlugin
 	{
 		if (player != null) return;
 		CreateOrLoadJsonFile(ModuleDirectory + "/tags.json");
-		Utilities.GetPlayers().ForEach(ApplyScoreboardTag);
+		Utilities.GetPlayers().ForEach(ApplyClanTag);
 
 		Server.PrintToConsole("[CS2-Tags] Config reloaded!");
 	}
@@ -132,10 +127,12 @@ public class CS2_Tags : BasePlugin
 	[CommandHelper(whoCanExecute: CommandUsage.SERVER_ONLY)]
 	public void OnTagsDebugCommand(CCSPlayerController? caller, CommandInfo command)
 	{
+		Server.PrintToConsole($"[CS2-Tags] sv_clantags_enabled={ClanTagsEnabled()}");
+
 		foreach (var player in Utilities.GetPlayers())
 		{
-			string cleared = ClearedClans.TryGetValue(player.Slot, out var entry) ? $"'{entry.Clan}' x{entry.Count}" : "-";
-			Server.PrintToConsole($"[CS2-Tags] #{player.Slot} {(player.IsBot ? "bot" : "joueur")} pseudo='{player.PlayerName}' clan='{player.Clan}' clanId={player.ClanId32bit} effacé={cleared}");
+			string original = OriginalClans.TryGetValue(player.Slot, out var entry) ? $"'{entry.Clan}' ({entry.ClanId})" : "-";
+			Server.PrintToConsole($"[CS2-Tags] #{player.Slot} {(player.IsBot ? "bot" : "joueur")} pseudo='{player.PlayerName}' clan='{player.Clan}' clanId={player.ClanId32bit} origine={original}");
 		}
 	}
 
@@ -171,7 +168,7 @@ public class CS2_Tags : BasePlugin
 
 		if (player == null || !player.IsValid || player.IsBot || player.IsHLTV) return;
 
-		AddTimer(2.0f, () => ApplyScoreboardTag(player));
+		AddTimer(2.0f, () => ApplyClanTag(player));
 	}
 
 	private HookResult OnPlayerConnectFull(EventPlayerConnectFull @event, GameEventInfo info)
@@ -180,16 +177,15 @@ public class CS2_Tags : BasePlugin
 
 		if (player == null || !player.IsValid || player.IsBot || player.IsHLTV) return HookResult.Continue;
 
-		AddTimer(2.0f, () => ApplyScoreboardTag(player));
+		AddTimer(2.0f, () => ApplyClanTag(player));
 
 		return HookResult.Continue;
 	}
 
 	private void OnClientDisconnect(int playerSlot)
 	{
-		RealNames.Remove(playerSlot);
-		AppliedNames.Remove(playerSlot);
-		ClearedClans.Remove(playerSlot);
+		OriginalClans.Remove(playerSlot);
+		AppliedClans.Remove(playerSlot);
 
 		CCSPlayerController? player = Utilities.GetPlayerFromSlot(playerSlot);
 
@@ -203,7 +199,7 @@ public class CS2_Tags : BasePlugin
 		CCSPlayerController? player = @event.Userid;
 		if (player == null || !player.IsValid) return HookResult.Continue;
 
-		AddTimer(1.5f, () => ApplyScoreboardTag(player));
+		AddTimer(1.5f, () => ApplyClanTag(player));
 
 		return HookResult.Continue;
 	}
@@ -213,17 +209,7 @@ public class CS2_Tags : BasePlugin
 		CCSPlayerController? player = @event.Userid;
 		if (player == null || !player.IsValid) return HookResult.Continue;
 
-		AddTimer(1.5f, () => ApplyScoreboardTag(player));
-
-		return HookResult.Continue;
-	}
-
-	private HookResult OnPlayerChangeName(EventPlayerChangename @event, GameEventInfo info)
-	{
-		CCSPlayerController? player = @event.Userid;
-		if (player == null || !player.IsValid) return HookResult.Continue;
-
-		AddTimer(1.0f, () => ApplyScoreboardTag(player));
+		AddTimer(1.5f, () => ApplyClanTag(player));
 
 		return HookResult.Continue;
 	}
@@ -247,7 +233,7 @@ public class CS2_Tags : BasePlugin
 				string nickColor = playerTag?["nick_color"]?.ToString() ?? ChatColors.Default.ToString();
 				string messageColor = playerTag?["message_color"]?.ToString() ?? ChatColors.Default.ToString();
 
-				Server.PrintToChatAll(ReplaceTags($" {deadIcon}{prefix}{nickColor}{RealName(player)}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", player.TeamNum));
+				SendChat(player, ReplaceTags($" {deadIcon}{prefix}{nickColor}{player.PlayerName}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", player.TeamNum), Utilities.GetPlayers());
 
 				return HookResult.Handled;
 			}
@@ -267,7 +253,7 @@ public class CS2_Tags : BasePlugin
 							string nickColor = groupTag?["nick_color"]?.ToString() ?? ChatColors.Default.ToString();
 							string messageColor = groupTag?["message_color"]?.ToString() ?? ChatColors.Default.ToString();
 
-							Server.PrintToChatAll(ReplaceTags($" {deadIcon}{prefix}{nickColor}{RealName(player)}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", player.TeamNum));
+							SendChat(player, ReplaceTags($" {deadIcon}{prefix}{nickColor}{player.PlayerName}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", player.TeamNum), Utilities.GetPlayers());
 
 							return HookResult.Handled;
 						}
@@ -287,7 +273,7 @@ public class CS2_Tags : BasePlugin
 							string nickColor = permissionTag?["nick_color"]?.ToString() ?? ChatColors.Default.ToString();
 							string messageColor = permissionTag?["message_color"]?.ToString() ?? ChatColors.Default.ToString();
 
-							Server.PrintToChatAll(ReplaceTags($" {deadIcon}{prefix}{nickColor}{RealName(player)}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", player.TeamNum));
+							SendChat(player, ReplaceTags($" {deadIcon}{prefix}{nickColor}{player.PlayerName}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", player.TeamNum), Utilities.GetPlayers());
 
 							return HookResult.Handled;
 						}
@@ -301,7 +287,7 @@ public class CS2_Tags : BasePlugin
 				string nickColor = everyoneTag?["nick_color"]?.ToString() ?? ChatColors.Default.ToString();
 				string messageColor = everyoneTag?["message_color"]?.ToString() ?? ChatColors.Default.ToString();
 
-				Server.PrintToChatAll(ReplaceTags($" {deadIcon}{prefix}{nickColor}{RealName(player)}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", player.TeamNum));
+				SendChat(player, ReplaceTags($" {deadIcon}{prefix}{nickColor}{player.PlayerName}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", player.TeamNum), Utilities.GetPlayers());
 
 				return HookResult.Handled;
 			}
@@ -321,7 +307,7 @@ public class CS2_Tags : BasePlugin
 		{
 			foreach (var p in Utilities.GetPlayers().Where(p => p.IsValid && !p.IsBot && !p.IsHLTV && AdminManager.PlayerHasPermissions(p, "@css/chat")))
 			{
-				p.PrintToChat($" {ChatColors.Lime}(ADMIN) {ChatColors.Default}{RealName(player)}: {info.GetArg(1).Remove(0, 1)}");
+				p.PrintToChat($" {ChatColors.Lime}(ADMIN) {ChatColors.Default}{player.PlayerName}: {info.GetArg(1).Remove(0, 1)}");
 			}
 
 			return HookResult.Handled;
@@ -340,8 +326,8 @@ public class CS2_Tags : BasePlugin
 
 				foreach (var p in Utilities.GetPlayers().Where(p => p.TeamNum == player.TeamNum && p.IsValid && !p.IsBot))
 				{
-					string messageToSend = $"{deadIcon}{TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{RealName(player)}{ChatColors.Default}: {messageColor}{info.GetArg(1)}";
-					p.PrintToChat($" {ReplaceTags(messageToSend, p.TeamNum)}");
+					string messageToSend = $"{deadIcon}{TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{player.PlayerName}{ChatColors.Default}: {messageColor}{info.GetArg(1)}";
+					SendChat(player, $" {ReplaceTags(messageToSend, p.TeamNum)}", new[] { p });
 				}
 
 				return HookResult.Handled;
@@ -362,8 +348,8 @@ public class CS2_Tags : BasePlugin
 
 						foreach (var p in Utilities.GetPlayers().Where(p => p.TeamNum == player.TeamNum && p.IsValid && !p.IsBot))
 						{
-							string messageToSend = $"{deadIcon}{TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{RealName(player)}{ChatColors.Default}: {messageColor}{info.GetArg(1)}";
-							p.PrintToChat($" {ReplaceTags(messageToSend, p.TeamNum)}");
+							string messageToSend = $"{deadIcon}{TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{player.PlayerName}{ChatColors.Default}: {messageColor}{info.GetArg(1)}";
+							SendChat(player, $" {ReplaceTags(messageToSend, p.TeamNum)}", new[] { p });
 						}
 
 						return HookResult.Handled;
@@ -383,8 +369,8 @@ public class CS2_Tags : BasePlugin
 
 						foreach (var p in Utilities.GetPlayers().Where(p => p.TeamNum == player.TeamNum && p.IsValid && !p.IsBot))
 						{
-							string messageToSend = $"{deadIcon}{TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{RealName(player)}{ChatColors.Default}: {messageColor}{info.GetArg(1)}";
-							p.PrintToChat($" {ReplaceTags(messageToSend, p.TeamNum)}");
+							string messageToSend = $"{deadIcon}{TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{player.PlayerName}{ChatColors.Default}: {messageColor}{info.GetArg(1)}";
+							SendChat(player, $" {ReplaceTags(messageToSend, p.TeamNum)}", new[] { p });
 						}
 
 						return HookResult.Handled;
@@ -400,10 +386,10 @@ public class CS2_Tags : BasePlugin
 
 				foreach (var p in Utilities.GetPlayers().Where(p => p.TeamNum == player.TeamNum && p.IsValid && !p.IsBot))
 				{
-					string messageToSend = $"{deadIcon}{TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{RealName(player)}{ChatColors.Default}: {messageColor}{info.GetArg(1)}";
-					p.PrintToChat($" {ReplaceTags(messageToSend, p.TeamNum)}");
+					string messageToSend = $"{deadIcon}{TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{player.PlayerName}{ChatColors.Default}: {messageColor}{info.GetArg(1)}";
+					SendChat(player, $" {ReplaceTags(messageToSend, p.TeamNum)}", new[] { p });
 				}
-				//p.PrintToChat(ReplaceTags($" {TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{RealName(player)}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", p.TeamNum));
+				//p.PrintToChat(ReplaceTags($" {TeamName(player.TeamNum)} {ChatColors.Default}{prefix}{nickColor}{player.PlayerName}{ChatColors.Default}: {messageColor}{info.GetArg(1)}", p.TeamNum));
 
 				return HookResult.Handled;
 			}
@@ -411,22 +397,48 @@ public class CS2_Tags : BasePlugin
 		return HookResult.Continue;
 	}
 
-	// Depuis la MAJ CS2 du 22/09/2026, le tag de clan a sa propre police : le tag "scoreboard" est donc mis devant le pseudo
-	private void ApplyScoreboardTag(CCSPlayerController? player)
+	// Depuis la MAJ CS2 du 22/09/2026, le tag de clan s'affiche à côté du pseudo (scoreboard et killfeed) : le tag "scoreboard" y est placé
+	private void ApplyClanTag(CCSPlayerController? player)
 	{
 		if (player == null || !player.IsValid || player.IsHLTV || (!player.IsBot && player.AuthorizedSteamID == null)) return;
 
-		string currentName = player.PlayerName;
+		SaveOriginalClan(player);
 
-		// Premier passage, ou pseudo changé ailleurs (jeu, Steam, autre plugin) : c'est le nouveau vrai pseudo
-		if (!AppliedNames.TryGetValue(player.Slot, out var appliedName) || appliedName != currentName)
-			RealNames[player.Slot] = StripScoreboardTags(currentName);
+		string tag = TruncateUtf8(GetScoreboardTag(player), 31); // m_szClan = char[32]
 
-		HideClanTag(player);
+		// Pas de tag pour ce joueur : il garde (ou retrouve) le tag de son groupe Steam
+		if (string.IsNullOrEmpty(tag))
+		{
+			RestoreOriginalClan(player);
+			AppliedClans.Remove(player.Slot);
+			return;
+		}
 
-		string tag = GetScoreboardTag(player);
-		SetName(player, string.IsNullOrEmpty(tag) ? RealNames[player.Slot] : WithSeparator(tag) + RealNames[player.Slot]);
-		AppliedNames[player.Slot] = player.PlayerName;
+		AppliedClans[player.Slot] = tag;
+		SetClan(player, tag, 0);
+	}
+
+	// Remet le tag du plugin si le jeu l'a remplacé par le tag du groupe Steam du joueur
+	private void EnforceClanTag(CCSPlayerController player)
+	{
+		if (!player.IsValid || player.IsHLTV || !AppliedClans.TryGetValue(player.Slot, out var tag)) return;
+
+		SaveOriginalClan(player);
+		SetClan(player, tag, 0);
+	}
+
+	// Un tag de clan différent de celui du plugin vient du jeu : c'est le tag d'origine du joueur
+	private void SaveOriginalClan(CCSPlayerController player)
+	{
+		if (!AppliedClans.TryGetValue(player.Slot, out var applied) || player.Clan != applied)
+			OriginalClans[player.Slot] = (player.Clan, player.ClanId32bit);
+	}
+
+	private void RestoreOriginalClan(CCSPlayerController player)
+	{
+		if (!player.IsValid || !AppliedClans.ContainsKey(player.Slot) || !OriginalClans.TryGetValue(player.Slot, out var original)) return;
+
+		SetClan(player, original.Clan, original.ClanId);
 	}
 
 	private string GetScoreboardTag(CCSPlayerController player)
@@ -455,71 +467,35 @@ public class CS2_Tags : BasePlugin
 		return "";
 	}
 
-	private string RealName(CCSPlayerController player)
-	{
-		if (AppliedNames.TryGetValue(player.Slot, out var appliedName) && appliedName == player.PlayerName && RealNames.TryGetValue(player.Slot, out var realName))
-			return realName;
-
-		return StripScoreboardTags(player.PlayerName);
-	}
-
-	private List<string> ScoreboardTags()
-	{
-		if (JsonTags?["tags"] is not JObject tagsObject) return new List<string>();
-
-		return tagsObject.Properties()
-			.Select(tagKey => tagKey.Value is JObject ? tagKey.Value["scoreboard"]?.ToString() : null)
-			.Where(tag => !string.IsNullOrWhiteSpace(tag))
-			.Select(tag => tag!)
-			.Distinct()
-			.ToList();
-	}
-
-	// Masque le tag de clan (texte et groupe) des joueurs et des bots : tag Steam, ancien tag du plugin.
+	// Le texte du tag est affiché par le jeu ; l'id de groupe est mis à 0 pour que ce ne soit pas celui d'un groupe Steam.
 	// L'étiquette « BOT » des bots est affichée par le jeu lui-même, elle ne vient pas du tag de clan.
-	private void HideClanTag(CCSPlayerController player)
+	private static void SetClan(CCSPlayerController player, string clan, uint clanId)
 	{
-		if (!player.IsValid || player.IsHLTV) return;
-
-		if (!string.IsNullOrEmpty(player.Clan))
+		if (player.Clan != clan)
 		{
-			ClearedClans[player.Slot] = (player.Clan, ClearedClans.TryGetValue(player.Slot, out var cleared) ? cleared.Count + 1 : 1);
-			player.Clan = "";
+			player.Clan = clan;
 			Utilities.SetStateChanged(player, "CCSPlayerController", "m_szClan");
 		}
 
-		if (player.ClanId32bit != 0)
+		if (player.ClanId32bit != clanId)
 		{
-			player.ClanId32bit = 0;
+			player.ClanId32bit = clanId;
 			Utilities.SetStateChanged(player, "CCSPlayerController", "m_unClanId32bit");
 		}
 	}
 
-	// Enlève les tags du début d'un pseudo (ex. après un rechargement du plugin, les pseudos sont déjà tagués)
-	private string StripScoreboardTags(string name)
+	// sv_clantags_enabled 0 (ajouté par la MAJ du 26/09/2026) masque tous les tags de clan, ceux du plugin compris
+	private static string ClanTagsEnabled()
 	{
-		var prefixes = ScoreboardTags().Select(WithSeparator).ToList();
-		string stripped = name;
-		string? prefix;
-
-		while ((prefix = prefixes.FirstOrDefault(p => stripped.StartsWith(p, StringComparison.Ordinal))) != null)
-			stripped = stripped.Substring(prefix.Length);
-
-		return string.IsNullOrWhiteSpace(stripped) ? name : stripped;
-	}
-
-	private static string WithSeparator(string tag)
-	{
-		return tag.EndsWith(' ') ? tag : tag + " ";
-	}
-
-	private static void SetName(CCSPlayerController player, string name)
-	{
-		name = TruncateUtf8(name, 127); // m_iszPlayerName = char[128]
-		if (player.PlayerName == name) return;
-
-		player.PlayerName = name;
-		Utilities.SetStateChanged(player, "CBasePlayerController", "m_iszPlayerName");
+		try
+		{
+			var convar = ConVar.Find("sv_clantags_enabled");
+			return convar == null ? "introuvable" : convar.GetPrimitiveValue<bool>().ToString();
+		}
+		catch (Exception)
+		{
+			return "illisible";
+		}
 	}
 
 	private static string TruncateUtf8(string value, int maxBytes)
@@ -554,29 +530,60 @@ public class CS2_Tags : BasePlugin
 				break;
 
 			case 2:
-				teamName = $"{ChatColors.Yellow}(T)";
+				teamName = $"{TeamColor(teamNum)}(T)";
 				break;
 
 			case 3:
-				teamName = $"{ChatColors.Blue}(CT)";
+				teamName = $"{TeamColor(teamNum)}(CT)";
 				break;
 		}
 
 		return teamName;
 	}
 
+	// "game_team_colors" (tags.json, true par défaut) : messages envoyés comme ceux du jeu, avec ses vraies couleurs d'équipe
+	private static bool GameTeamColors => JsonTags?["game_team_colors"]?.Type != JTokenType.Boolean || JsonTags["game_team_colors"]!.Value<bool>();
+
+	// Envoie le message au nom du joueur (SayText2, comme le chat du jeu) : le jeu colore alors \x03 avec la couleur de son équipe
+	private static void SendChat(CCSPlayerController sender, string message, IEnumerable<CCSPlayerController> recipients)
+	{
+		var players = recipients.Where(p => p.IsValid && !p.IsBot && !p.IsHLTV).ToArray();
+		if (players.Length == 0) return;
+
+		if (!GameTeamColors)
+		{
+			foreach (var p in players)
+				p.PrintToChat(message);
+			return;
+		}
+
+		using var sayText = UserMessage.FromPartialName("SayText2");
+		sayText.SetUInt("entityindex", sender.Index);
+		sayText.SetBool("chat", true);
+		sayText.SetString("messagename", message);
+		sayText.SetString("param1", "");
+		sayText.SetString("param2", "");
+		sayText.SetString("param3", "");
+		sayText.SetString("param4", "");
+		sayText.Send(new RecipientFilter(players));
+	}
+
+	// Avec game_team_colors : \x03, coloré par le jeu. Sinon, couleurs les plus proches de la palette du chat : jaune clair (T), bleu clair (CT)
 	private string TeamColor(int teamNum)
 	{
+		if (GameTeamColors && (teamNum == 2 || teamNum == 3))
+			return "\x03";
+
 		string teamColor;
 
 		switch (teamNum)
 		{
 			case 2:
-				teamColor = $"{ChatColors.Gold}";
+				teamColor = $"{ChatColors.LightYellow}";
 				break;
 
 			case 3:
-				teamColor = $"{ChatColors.Blue}";
+				teamColor = $"{ChatColors.BlueGrey}";
 				break;
 
 			default:
