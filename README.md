@@ -90,6 +90,8 @@ Utilisables dans `prefix`, `nick_color` et `message_color`, entre accolades, san
 
 Pour cela, le plugin envoie les messages comme le jeu lui-même, au nom du joueur. Si les couleurs d'équipe ne s'affichent pas correctement, ajouter `"game_team_colors": false` au début de `tags.json` (à côté de `"tags"`, pas dedans), puis lancer `css_tags_reload` : les messages sont alors envoyés comme avant, avec les couleurs les plus proches de la palette du chat (jaune clair pour les T, bleu clair pour les CT).
 
+Les couleurs de coéquipier du compétitif (au-dessus des têtes, radar, tableau des scores, point devant le message dans le chat) sont retirées par défaut. Pour les garder, ajouter `"hide_teammate_colors": false` au début de `tags.json`, puis lancer `css_tags_reload`. Le point dans le chat est alors évité en envoyant les messages de ces joueurs avec les couleurs d'équipe approchées.
+
 Les couleurs ne s'appliquent qu'au chat : au scoreboard et dans le killfeed, le tag de clan s'affiche avec la police et la couleur du jeu.
 
 ## À savoir

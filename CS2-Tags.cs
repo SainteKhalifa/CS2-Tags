@@ -47,6 +47,14 @@ public class CS2_Tags : BasePlugin
 
 		// Le jeu peut remettre le tag de clan Steam à tout moment (données Steam du joueur reçues en différé)
 		AddTimer(2.0f, () => Utilities.GetPlayers().ForEach(EnforceClanTag), TimerFlags.REPEAT);
+
+		// Couleurs de coéquipier : le jeu les redonne en continu, on les retire à chaque tick (avant leur envoi aux joueurs)
+		// pour qu'elles ne clignotent pas
+		RegisterListener<Listeners.OnTick>(() =>
+		{
+			if (HideTeammateColors)
+				Utilities.GetPlayers().ForEach(HideTeammateColor);
+		});
 	}
 
 	public override void Unload(bool hotReload)
@@ -200,6 +208,7 @@ public class CS2_Tags : BasePlugin
 		if (player == null || !player.IsValid) return HookResult.Continue;
 
 		AddTimer(1.5f, () => ApplyClanTag(player));
+		Server.NextFrame(() => HideTeammateColor(player));
 
 		return HookResult.Continue;
 	}
@@ -484,6 +493,18 @@ public class CS2_Tags : BasePlugin
 		}
 	}
 
+	// "hide_teammate_colors" (tags.json, true par défaut) : retire les couleurs de coéquipier du compétitif (au-dessus des têtes, radar, tableau des scores, point dans le chat)
+	private static bool HideTeammateColors => JsonTags?["hide_teammate_colors"]?.Type != JTokenType.Boolean || JsonTags["hide_teammate_colors"]!.Value<bool>();
+
+	// Le jeu redonne une couleur au joueur (apparition, changement d'équipe) : -1 = aucune couleur
+	private static void HideTeammateColor(CCSPlayerController player)
+	{
+		if (!HideTeammateColors || !player.IsValid || player.CompTeammateColor < 0) return;
+
+		player.CompTeammateColor = -1;
+		Utilities.SetStateChanged(player, "CCSPlayerController", "m_iCompTeammateColor");
+	}
+
 	// sv_clantags_enabled 0 (ajouté par la MAJ du 26/09/2026) masque tous les tags de clan, ceux du plugin compris
 	private static string ClanTagsEnabled()
 	{
@@ -550,8 +571,13 @@ public class CS2_Tags : BasePlugin
 		var players = recipients.Where(p => p.IsValid && !p.IsBot && !p.IsHLTV).ToArray();
 		if (players.Length == 0) return;
 
-		if (!GameTeamColors)
+		// En compétitif, le jeu ajoute un point de la couleur du joueur devant tout message SayText2 envoyé à son nom :
+		// on passe alors par le chat simple, avec les couleurs d'équipe approchées
+		if (!GameTeamColors || sender.CompTeammateColor >= 0)
 		{
+			if (GameTeamColors)
+				message = message.Replace("\x03", FallbackTeamColor(sender.TeamNum));
+
 			foreach (var p in players)
 				p.PrintToChat(message);
 			return;
@@ -574,6 +600,11 @@ public class CS2_Tags : BasePlugin
 		if (GameTeamColors && (teamNum == 2 || teamNum == 3))
 			return "\x03";
 
+		return FallbackTeamColor(teamNum);
+	}
+
+	private static string FallbackTeamColor(int teamNum)
+	{
 		string teamColor;
 
 		switch (teamNum)
